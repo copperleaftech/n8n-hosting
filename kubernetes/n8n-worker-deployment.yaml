@@ -2,20 +2,20 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    service: n8n
-  name: n8n
+    service: n8n-worker
+  name: n8n-worker
   namespace: n8n
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
-      service: n8n
+      service: n8n-worker
   strategy:
-    type: Recreate
+    type: RollingUpdate
   template:
     metadata:
       labels:
-        service: n8n
+        service: n8n-worker
     spec:
       initContainers:
         - name: volume-permissions
@@ -29,8 +29,9 @@ spec:
             - /bin/sh
           args:
             - -c
-            - sleep 5; n8n start
+            - sleep 5; n8n worker
           env:
+            # Database Configuration
             - name: DB_TYPE
               value: postgresdb
             - name: DB_POSTGRESDB_HOST
@@ -49,16 +50,24 @@ spec:
                 secretKeyRef:
                   name: postgres-secret
                   key: POSTGRES_NON_ROOT_PASSWORD
-            - name: N8N_PROTOCOL
-              value: http
-            - name: N8N_PORT
-              value: "5678"
+            # Redis Queue Configuration
             - name: QUEUE_BULL_REDIS_HOST
               value: redis-service.n8n.svc.cluster.local
             - name: QUEUE_BULL_REDIS_PORT
               value: "6379"
+            # Queue Mode Configuration
             - name: EXECUTIONS_MODE
               value: queue
+            # Worker-specific Configuration
+            - name: N8N_LOG_LEVEL
+              value: info
+            - name: QUEUE_HEALTH_CHECK_PORT
+              value: "5679"
+            # Security and Performance
+            - name: N8N_SECURE_COOKIE
+              value: "false"
+            - name: N8N_METRICS
+              value: "false"
             - name: N8N_DIAGNOSTICS_ENABLED
               value: "false"
             - name: N8N_HIRING_BANNER_ENABLED
@@ -77,66 +86,24 @@ spec:
                 secretKeyRef:
                   name: n8n-secret
                   key: GENERIC_TIMEZONE
+            # Process Configuration
+            - name: N8N_WORKERS_ENABLED
+              value: "true"
+            # Encryption Key (REQUIRED - must match main instance)
             - name: N8N_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
                   name: n8n-secret
                   key: N8N_ENCRYPTION_KEY
-            - name: N8N_WEBHOOK_URL
-              valueFrom:
-                secretKeyRef:
-                  name: n8n-secret
-                  key: N8N_WEBHOOK_URL
-            - name: N8N_EDITOR_BASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: n8n-secret
-                  key: N8N_EDITOR_BASE_URL
-            # SMTP Email Configuration
-            - name: N8N_EMAIL_MODE
-              valueFrom:
-                secretKeyRef:
-                  name: n8n-secret
-                  key: N8N_EMAIL_MODE
-            - name: N8N_SMTP_HOST
-              valueFrom:
-                secretKeyRef:
-                  name: n8n-secret
-                  key: N8N_SMTP_HOST
-            - name: N8N_SMTP_PORT
-              valueFrom:
-                secretKeyRef:
-                  name: n8n-secret
-                  key: N8N_SMTP_PORT
-            - name: N8N_SMTP_USER
-              valueFrom:
-                secretKeyRef:
-                  name: n8n-secret
-                  key: N8N_SMTP_USER
-            - name: N8N_SMTP_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: n8n-secret
-                  key: N8N_SMTP_PASS
-            - name: N8N_SMTP_SENDER
-              valueFrom:
-                secretKeyRef:
-                  name: n8n-secret
-                  key: N8N_SMTP_SENDER
-            - name: N8N_SMTP_SSL
-              valueFrom:
-                secretKeyRef:
-                  name: n8n-secret
-                  key: N8N_SMTP_SSL
           image: n8nio/n8n
-          name: n8n
-          ports:
-            - containerPort: 5678
+          name: n8n-worker
           resources:
             requests:
               memory: "250Mi"
+              cpu: "100m"
             limits:
-              memory: "500Mi"
+              memory: "1Gi"
+              cpu: "500m"
           volumeMounts:
             - mountPath: /home/node/.n8n
               name: n8n-claim0
@@ -145,9 +112,6 @@ spec:
         - name: n8n-claim0
           persistentVolumeClaim:
             claimName: n8n-claim0
-        - name: n8n-secret
-          secret:
-            secretName: n8n-secret
         - name: postgres-secret
           secret:
             secretName: postgres-secret
